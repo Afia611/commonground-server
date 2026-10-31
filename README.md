@@ -75,6 +75,10 @@ src/
 │   └── validate.ts           # Reusable zod validation middleware
 ├── schemas/
 │   └── opportunity.schema.ts # Zod schemas for list query and :id params
+├── data/
+│   └── sample-opportunities.ts # The six frontend demo records (seed source)
+├── scripts/
+│   └── seed.ts               # Development-only idempotent seeding (npm run seed)
 └── types/                    # Shared TypeScript types
 tests/                        # vitest + supertest API tests
 ```
@@ -134,7 +138,7 @@ Public detail view for a single opportunity. `:id` must be a 24-hex-character Mo
 
 ## Data policy
 
-The MongoDB `opportunities` collection is kept **empty** until real data is available. The six sample opportunities in the frontend are fictional placeholders — no fake records are seeded automatically. If you want a demo seed, it must be requested explicitly.
+The MongoDB `opportunities` collection stays **empty until real data or an explicitly requested seed is provided**. The six sample opportunities in the frontend are fictional demo placeholders, kept out of the database unless you run `npm run seed` (see *Seeding* above). No fake records are seeded automatically.
 
 ## Development notes
 
@@ -142,3 +146,23 @@ The MongoDB `opportunities` collection is kept **empty** until real data is avai
 - **Graceful shutdown**: on `SIGINT`/`SIGTERM` the HTTP server stops accepting connections, the MongoDB client is closed, and the process exits cleanly (with a forced-exit timeout).
 - **MongoDB down ≠ server down**: if the database is unreachable at boot, the API still serves `/api/health` with `database.connected: false`; data endpoints return a handled `500` until the connection succeeds on restart.
 - **Validating changes**: `npm run build` (strict `tsc`) and `npm test` must pass.
+
+## Seeding (development only)
+
+`npm run seed` inserts the six original CommonGround sample opportunities —
+copied field-for-field from the frontend demo data — into the `opportunities`
+collection. Run it manually whenever you want demo data; the server never
+invokes it automatically, so a fresh database stays empty at startup.
+
+```bash
+npm run seed     # insert/refresh the six sample opportunities
+```
+
+Properties:
+
+- **Idempotent** — documents are upserted by a stable `slug` (e.g. `garden-restoration`), so running the script repeatedly refreshes them in place instead of duplicating. A unique index on `slug` guards against accidents.
+- **Explicit** — the script prints insert/update counts and stops on failure.
+- **Credential-safe** — MongoDB credentials come from `.env` only and are never printed in logs.
+- **Sample data integrity** — `tests/sample-data.test.ts` verifies the six records stay complete (organic fields, organizer profiles, unique slugs).
+
+**Note for networks that refuse SRV lookups:** Atlas `mongodb+srv://` connection strings need DNS SRV record queries, which some Windows networks/ISPs block. The shared connection helper (`src/config/db.ts`) detects this and retries transparently through public DNS (Google/Cloudflare), building an equivalent direct connection string — credentials are carried internally and never logged. If you prefer, replacing the `mongodb+srv://` URI in `.env` with the standard connection string provided by Atlas achieves the same.

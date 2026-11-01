@@ -18,6 +18,11 @@ const envSchema = z.object({
     .min(1)
     .default("http://localhost:3000"),
   JWT_SECRET: z.string().min(16).default("dev_only_jwt_secret_change_me"),
+  /**
+   * Origin of the BetterAuth-enabled frontend whose /api/auth/jwks endpoint
+   * issues the JWKS used to verify incoming Bearer JWTs.
+   */
+  BETTER_AUTH_URL: z.string().min(1).default("http://localhost:3000"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -45,6 +50,7 @@ export const env = {
     .map((url) => url.trim())
     .filter(Boolean),
   jwtSecret: raw.JWT_SECRET,
+  betterAuthUrl: raw.BETTER_AUTH_URL,
 } as const;
 
 export type Env = typeof env;

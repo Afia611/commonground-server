@@ -1,8 +1,9 @@
-import type { Db } from "mongodb";
+import type { Collection, Db } from "mongodb";
 import { ObjectId, OptionalId } from "mongodb";
 import { getDb } from "../config/db.js";
 import type { Opportunity } from "../types/opportunity.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import type { CreateOpportunityBody } from "../schemas/opportunity.schema.js";
 
 export const OPPORTUNITIES_COLLECTION = "opportunities";
 
@@ -88,7 +89,7 @@ export async function getOpportunityById(id: string, db?: Db): Promise<Opportuni
   return toOpportunity(doc);
 }
 
-function toOpportunity(doc: OptionalId<Record<string, unknown>>): Opportunity {
+export function toOpportunity(doc: OptionalId<Record<string, unknown>>): Opportunity {
   const { _id, createdAt, updatedAt, ...rest } = doc as {
     _id: ObjectId;
     createdAt?: unknown;
@@ -101,4 +102,113 @@ function toOpportunity(doc: OptionalId<Record<string, unknown>>): Opportunity {
     createdAt: createdAt instanceof Date ? createdAt.toISOString() : undefined,
     updatedAt: updatedAt instanceof Date ? updatedAt.toISOString() : undefined,
   } as Opportunity;
+}
+
+/** Verified creator identity delivered by the JWT middleware (never by the client). */
+export interface OpportunityCreator {
+  userId: string;
+  email: string;
+  name?: string;
+}
+
+/** Defaults for fields the create-event form does not collect. */
+const DEFAULT_SPOTS = 50;
+const SCHEDULE_TIME_ZONE = "UTC";
+
+/** URL-safe slug from a title, mirroring the demo data slug style. */
+export function slugifyTitle(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/[\s-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "event"
+  );
+}
+
+async function ensureUniqueSlug(
+  collection: Collection<Record<string, unknown>>,
+  base: string,
+): Promise<string> {
+  let candidate = base;
+  let attempt = 2;
+  while ((await collection.findOne({ slug: candidate })) !== null) {
+    candidate = `${base}-${attempt}`;
+    attempt += 1;
+  }
+  return candidate;
+}
+
+/** Short city name derived from a full location line (used by the city filter). */
+function deriveCity(location: string): string {
+  return location.split(",")[0]?.trim() || location;
+}
+
+/** "2026-11-14" → "Sat 14 Nov 2026", matching the demo schedule style. */
+function formatSchedule(eventDate: string): string {
+  const date = new Date(`${eventDate}T00:00:00Z`);
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: SCHEDULE_TIME_ZONE,
+  }).format(date);
+}
+
+/**
+ * Create a new opportunity from a validated body, bound to the creator whose
+ * identity was verified via the BetterAuth JWT (requireJwtAuth). Creator
+ * fields from the client are ignored — the caller passes only the JWT identity.
+ * Records keep the full shape the public detail pages render (organizer,
+ * schedule, spots, ...), so created events appear everywhere demo data does.
+ */
+export async function createOpportunity(
+  input: CreateOpportunityBody,
+  creator: OpportunityCreator,
+  db?: Db,
+): Promise<Opportunity> {
+  const database = db ?? getDb();
+  const collection = database.collection(OPPORTUNITIES_COLLECTION);
+
+  const slug = await ensureUniqueSlug(collection, slugifyTitle(input.title));
+  const schedule = formatSchedule(input.eventDate);
+  const organizerName = creator.name?.trim() || "CommonGround organizer";
+
+  const now = new Date();
+  const record = {
+    slug,
+    featured: false,
+    title: input.title,
+    organization: organizerName,
+    organizer: {
+      name: organizerName,
+      about: `This event is hosted by ${organizerName} through CommonGround.`,
+      contactEmail: creator.email,
+    },
+    category: input.eventType,
+    location: input.location,
+    city: deriveCity(input.location),
+    schedule,
+    duration: "Single day · flexible hours",
+    description: input.description,
+    responsibilities: [],
+    requirements: [],
+    benefits: [],
+    spotsTotal: DEFAULT_SPOTS,
+    spotsLeft: DEFAULT_SPOTS,
+    imageUrl: input.imageUrl ?? null,
+    eventDate: new Date(`${input.eventDate}T00:00:00Z`).toISOString(),
+    createdBy: {
+      userId: creator.userId,
+      email: creator.email,
+      name: creator.name ?? null,
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const result = await collection.insertOne({ ...record });
+  return toOpportunity({ ...record, _id: result.insertedId });
 }

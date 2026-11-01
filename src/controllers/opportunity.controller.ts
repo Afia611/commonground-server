@@ -1,6 +1,11 @@
 import type { Request, Response } from "express";
 import type { ListOpportunitiesFilters } from "../services/opportunity.service.js";
-import { getOpportunityById, listOpportunities } from "../services/opportunity.service.js";
+import {
+  createOpportunity,
+  getOpportunityById,
+  listOpportunities,
+} from "../services/opportunity.service.js";
+import type { AuthenticatedUser } from "../middleware/authenticate.js";
 
 /**
  * GET /api/opportunities
@@ -24,4 +29,28 @@ export async function getOpportunityByIdHandler(_req: Request, res: Response): P
   const { id } = res.locals.validated?.params ?? {};
   const opportunity = await getOpportunityById(id);
   res.json({ success: true, data: opportunity });
+}
+
+/**
+ * POST /api/opportunities
+ * Protected event creation. requireJwtAuth has already verified the caller,
+ * so the creator identity comes from res.locals.auth — the browser is never
+ * trusted for creator identity.
+ */
+export async function createOpportunityHandler(_req: Request, res: Response): Promise<void> {
+  const auth = res.locals.auth as AuthenticatedUser | undefined;
+  if (!auth?.userId || !auth.email) {
+    // Defensive: requireJwtAuth guarantees this, but never persist creator-less records.
+    res.status(401).json({ success: false, status: 401, message: "Invalid or expired token." });
+    return;
+  }
+
+  const body = res.locals.validated?.body;
+  const opportunity = await createOpportunity(body, {
+    userId: auth.userId,
+    email: auth.email,
+    name: auth.name,
+  });
+
+  res.status(201).json({ success: true, data: opportunity });
 }

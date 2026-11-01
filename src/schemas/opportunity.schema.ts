@@ -1,6 +1,9 @@
+
 import { z } from "zod";
 
-/** Query parameters accepted by GET /api/opportunities */
+/**
+ * Query parameters accepted by GET /api/opportunities.
+ */
 export const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(12),
@@ -8,7 +11,14 @@ export const listQuerySchema = z.object({
   search: z.string().trim().min(1).max(120).optional(),
 });
 
-/** Path parameters accepted by GET /api/opportunities/:id (ObjectId or slug) */
+export type ListOpportunitiesQuery = z.infer<
+  typeof listQuerySchema
+>;
+
+/**
+ * Path parameters for opportunity details, updates and deletion.
+ * Supports MongoDB ObjectId and event slug.
+ */
 export const opportunityParamSchema = z.object({
   id: z
     .string()
@@ -17,15 +27,12 @@ export const opportunityParamSchema = z.object({
     .max(120)
     .regex(
       /^(?:[0-9a-fA-F]{24}|[a-z0-9]+(?:-[a-z0-9]+)*)$/,
-      "id must be a 24-character ObjectId or an opportunity slug",
+      "ID must be a 24-character ObjectId or an opportunity slug"
     ),
 });
 
-export type ListOpportunitiesQuery = z.infer<typeof listQuerySchema>;
-
 /**
- * Event types accepted for created events. Mirrors the CommonGround design
- * categories used across the site ("Other" covers anything the form lacks).
+ * Available event categories.
  */
 export const EVENT_TYPES = [
   "Cleanup",
@@ -38,54 +45,133 @@ export const EVENT_TYPES = [
 
 export type EventType = (typeof EVENT_TYPES)[number];
 
-/** Non-empty string that parses as an absolute http(s) URL. */
+/**
+ * Validate image URL.
+ */
 const httpUrl = z
   .string()
   .trim()
   .max(600)
-  .refine((value) => {
-    try {
-      const url = new URL(value);
-      return url.protocol === "http:" || url.protocol === "https:";
-    } catch {
-      return false;
-    }
-  }, "Must be a valid http(s) URL");
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(value);
+
+        return (
+          url.protocol === "http:" ||
+          url.protocol === "https:"
+        );
+      } catch {
+        return false;
+      }
+    },
+    "Must be a valid HTTP or HTTPS URL"
+  );
 
 /**
- * A whole calendar day that has not started yet, or has started today
- * (server-local time). Today is accepted; any earlier day is rejected.
+ * Validate a real calendar date.
  */
-function dayIsInFuture(raw: string): boolean {
-  const dayStart = new Date(`${raw}T00:00:00`);
-  if (Number.isNaN(dayStart.getTime())) return false;
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  return dayStart.getTime() >= todayStart.getTime();
+function isRealCalendarDate(raw: string): boolean {
+  const date = new Date(`${raw}T00:00:00Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  return date.toISOString().slice(0, 10) === raw;
 }
 
+/**
+ * Validate today or a future date.
+ * Uses UTC calendar dates consistently with event storage.
+ */
+function dayIsInFuture(raw: string): boolean {
+  if (!isRealCalendarDate(raw)) {
+    return false;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  return raw >= today;
+}
+
+/**
+ * Event date validation.
+ */
 const eventDateString = z
   .string()
   .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Event date must be in YYYY-MM-DD format")
-  .refine((raw) => !Number.isNaN(new Date(`${raw}T00:00:00`).getTime()), "Event date is not a real date")
-  .refine(dayIsInFuture, "Event date cannot be in the past");
+  .regex(
+    /^\d{4}-\d{2}-\d{2}$/,
+    "Event date must be in YYYY-MM-DD format"
+  )
+  .refine(
+    isRealCalendarDate,
+    "Event date is not a real calendar date"
+  )
+  .refine(
+    dayIsInFuture,
+    "Event date cannot be in the past"
+  );
 
 /**
- * Body accepted by POST /api/opportunities. Creator identity is NEVER taken
- * from here — it is bound server-side from the verified JWT (see
- * src/middleware/authenticate.ts). Unknown fields are rejected to keep
- * client payloads explicit.
+ * POST /api/opportunities
+ *
+ * Create Event validation.
+ * Creator identity comes from the verified JWT,
+ * never from the submitted request body.
  */
 export const createOpportunityBodySchema = z
   .object({
-    title: z.string().trim().min(3, "Title must be at least 3 characters").max(120),
-    description: z.string().trim().min(20, "Description must be at least 20 characters").max(4000),
+    title: z
+      .string()
+      .trim()
+      .min(3, "Title must be at least 3 characters")
+      .max(120),
+
+    description: z
+      .string()
+      .trim()
+      .min(20, "Description must be at least 20 characters")
+      .max(4000),
+
     eventType: z.enum(EVENT_TYPES),
+
     imageUrl: httpUrl.optional(),
-    location: z.string().trim().min(3, "Location must be at least 3 characters").max(200),
+
+    location: z
+      .string()
+      .trim()
+      .min(3, "Location must be at least 3 characters")
+      .max(200),
+
     eventDate: eventDateString,
   })
   .strict();
 
-export type CreateOpportunityBody = z.infer<typeof createOpportunityBodySchema>;
+export type CreateOpportunityBody = z.infer<
+  typeof createOpportunityBodySchema
+>;
+
+/**
+ * PATCH /api/opportunities/:id
+ *
+ * Update Event validation.
+ *
+ * Allows partial updates but requires at least
+ * one editable field.
+ *
+ * Protected fields such as createdBy, createdAt,
+ * and spotsLeft cannot be modified.
+ */
+export const updateOpportunityBodySchema =
+  createOpportunityBodySchema
+    .partial()
+    .refine(
+      (data) => Object.keys(data).length > 0,
+      "Provide at least one field to update"
+    );
+
+export type UpdateOpportunityBody = z.infer<
+  typeof updateOpportunityBodySchema
+>;

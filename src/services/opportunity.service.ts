@@ -1,11 +1,19 @@
-import type { Collection, Db } from "mongodb";
-import { ObjectId, OptionalId } from "mongodb";
+
+import type { Collection, Db, Filter } from "mongodb";
+import { ObjectId } from "mongodb";
 import { getDb } from "../config/db.js";
 import type { Opportunity } from "../types/opportunity.js";
 import { ApiError } from "../middleware/errorHandler.js";
-import type { CreateOpportunityBody } from "../schemas/opportunity.schema.js";
+import type {
+  CreateOpportunityBody,
+  UpdateOpportunityBody,
+} from "../schemas/opportunity.schema.js";
 
 export const OPPORTUNITIES_COLLECTION = "opportunities";
+
+type OpportunityDocument = Record<string, unknown> & {
+  _id?: ObjectId;
+};
 
 export interface ListOpportunitiesFilters {
   page: number;
@@ -23,29 +31,69 @@ export interface PaginatedResult<T> {
 }
 
 /**
- * Build a Mongo filter from validated list filters.
- * Search matches case-insensitively against title and description.
+ * Build MongoDB filters for public event listing.
  */
-function buildFilter(filters: ListOpportunitiesFilters): Record<string, unknown> {
+function buildFilter(
+  filters: ListOpportunitiesFilters,
+): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
-  if (filters.category) filter.category = filters.category;
+
+  if (filters.category) {
+    filter.category = filters.category;
+  }
+
   if (filters.search) {
-    const pattern = filters.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = filters.search.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    );
+
     filter.$or = [
       { title: { $regex: pattern, $options: "i" } },
       { description: { $regex: pattern, $options: "i" } },
     ];
   }
+
   return filter;
 }
 
-/** List opportunities (read-only), newest first, paginated. */
+/**
+ * Convert MongoDB documents to frontend-friendly events.
+ */
+export function toOpportunity(
+  doc: OpportunityDocument,
+): Opportunity {
+  const { _id, createdAt, updatedAt, ...rest } = doc;
+
+  if (!(_id instanceof ObjectId)) {
+    throw new Error("Opportunity document is missing a valid ObjectId");
+  }
+
+  return {
+    id: _id.toHexString(),
+    ...rest,
+    createdAt:
+      createdAt instanceof Date
+        ? createdAt.toISOString()
+        : undefined,
+    updatedAt:
+      updatedAt instanceof Date
+        ? updatedAt.toISOString()
+        : undefined,
+  } as Opportunity;
+}
+
+/**
+ * GET /api/opportunities
+ * Public listing, newest first, with pagination.
+ */
 export async function listOpportunities(
   filters: ListOpportunitiesFilters,
   db?: Db,
 ): Promise<PaginatedResult<Opportunity>> {
   const database = db ?? getDb();
   const collection = database.collection(OPPORTUNITIES_COLLECTION);
+
   const filter = buildFilter(filters);
   const skip = (filters.page - 1) * filters.limit;
 
@@ -64,58 +112,70 @@ export async function listOpportunities(
     page: filters.page,
     limit: filters.limit,
     total,
-    totalPages: Math.max(1, Math.ceil(total / filters.limit)),
+    totalPages: Math.max(
+      1,
+      Math.ceil(total / filters.limit),
+    ),
   };
 }
 
 /**
- * Fetch a single opportunity by id (read-only). Supports both MongoDB
- * ObjectIds (used by API consumers and the frontend after a list request)
- * and the stable demo `slug` (used by older frontend links and bookmarks).
- * Throws 400/404 as ApiError.
+ * Build a MongoDB identity filter.
+ * Supports both ObjectId and slug.
  */
-export async function getOpportunityById(id: string, db?: Db): Promise<Opportunity> {
-  const looksLikeObjectId = ObjectId.isValid(id);
-  const query = looksLikeObjectId
-    ? { $or: [{ _id: new ObjectId(id) }, { slug: id }] }
-    : { slug: id };
+function opportunityIdentityFilter(
+  id: string,
+): Filter<OpportunityDocument> {
+  if (ObjectId.isValid(id)) {
+    return {
+      $or: [
+        { _id: new ObjectId(id) },
+        { slug: id },
+      ],
+    };
+  }
 
+  return { slug: id };
+}
+
+/**
+ * GET /api/opportunities/:id
+ * Public opportunity details.
+ */
+export async function getOpportunityById(
+  id: string,
+  db?: Db,
+): Promise<Opportunity> {
   const database = db ?? getDb();
-  const doc = await database.collection(OPPORTUNITIES_COLLECTION).findOne(query);
+
+  const doc = await database
+    .collection<OpportunityDocument>(OPPORTUNITIES_COLLECTION)
+    .findOne(opportunityIdentityFilter(id));
 
   if (!doc) {
-    throw ApiError.notFound(`Opportunity with id '${id}' not found`);
+    throw ApiError.notFound(
+      `Opportunity with id '${id}' not found`,
+    );
   }
+
   return toOpportunity(doc);
 }
 
-export function toOpportunity(doc: OptionalId<Record<string, unknown>>): Opportunity {
-  const { _id, createdAt, updatedAt, ...rest } = doc as {
-    _id: ObjectId;
-    createdAt?: unknown;
-    updatedAt?: unknown;
-    [key: string]: unknown;
-  };
-  return {
-    id: _id.toHexString(),
-    ...rest,
-    createdAt: createdAt instanceof Date ? createdAt.toISOString() : undefined,
-    updatedAt: updatedAt instanceof Date ? updatedAt.toISOString() : undefined,
-  } as Opportunity;
-}
-
-/** Verified creator identity delivered by the JWT middleware (never by the client). */
+/**
+ * Verified creator identity from JWT.
+ */
 export interface OpportunityCreator {
   userId: string;
   email: string;
   name?: string;
 }
 
-/** Defaults for fields the create-event form does not collect. */
 const DEFAULT_SPOTS = 50;
 const SCHEDULE_TIME_ZONE = "UTC";
 
-/** URL-safe slug from a title, mirroring the demo data slug style. */
+/**
+ * Convert event titles to URL-friendly slugs.
+ */
 export function slugifyTitle(title: string): string {
   return (
     title
@@ -127,27 +187,39 @@ export function slugifyTitle(title: string): string {
   );
 }
 
+/**
+ * Generate a unique event slug.
+ */
 async function ensureUniqueSlug(
-  collection: Collection<Record<string, unknown>>,
+  collection: Collection<OpportunityDocument>,
   base: string,
 ): Promise<string> {
   let candidate = base;
   let attempt = 2;
-  while ((await collection.findOne({ slug: candidate })) !== null) {
+
+  while (
+    (await collection.findOne({ slug: candidate })) !== null
+  ) {
     candidate = `${base}-${attempt}`;
     attempt += 1;
   }
+
   return candidate;
 }
 
-/** Short city name derived from a full location line (used by the city filter). */
+/**
+ * Extract city from event location.
+ */
 function deriveCity(location: string): string {
   return location.split(",")[0]?.trim() || location;
 }
 
-/** "2026-11-14" → "Sat 14 Nov 2026", matching the demo schedule style. */
+/**
+ * Format an event date for display.
+ */
 function formatSchedule(eventDate: string): string {
   const date = new Date(`${eventDate}T00:00:00Z`);
+
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "short",
     day: "numeric",
@@ -158,11 +230,9 @@ function formatSchedule(eventDate: string): string {
 }
 
 /**
- * Create a new opportunity from a validated body, bound to the creator whose
- * identity was verified via the BetterAuth JWT (requireJwtAuth). Creator
- * fields from the client are ignored — the caller passes only the JWT identity.
- * Records keep the full shape the public detail pages render (organizer,
- * schedule, spots, ...), so created events appear everywhere demo data does.
+ * POST /api/opportunities
+ *
+ * Create an event using the authenticated user's identity.
  */
 export async function createOpportunity(
   input: CreateOpportunityBody,
@@ -170,13 +240,24 @@ export async function createOpportunity(
   db?: Db,
 ): Promise<Opportunity> {
   const database = db ?? getDb();
-  const collection = database.collection(OPPORTUNITIES_COLLECTION);
 
-  const slug = await ensureUniqueSlug(collection, slugifyTitle(input.title));
+  const collection =
+    database.collection<OpportunityDocument>(
+      OPPORTUNITIES_COLLECTION,
+    );
+
+  const slug = await ensureUniqueSlug(
+    collection,
+    slugifyTitle(input.title),
+  );
+
   const schedule = formatSchedule(input.eventDate);
-  const organizerName = creator.name?.trim() || "CommonGround organizer";
+
+  const organizerName =
+    creator.name?.trim() || "CommonGround organizer";
 
   const now = new Date();
+
   const record = {
     slug,
     featured: false,
@@ -199,7 +280,9 @@ export async function createOpportunity(
     spotsTotal: DEFAULT_SPOTS,
     spotsLeft: DEFAULT_SPOTS,
     imageUrl: input.imageUrl ?? null,
-    eventDate: new Date(`${input.eventDate}T00:00:00Z`).toISOString(),
+    eventDate: new Date(
+      `${input.eventDate}T00:00:00Z`,
+    ).toISOString(),
     createdBy: {
       userId: creator.userId,
       email: creator.email,
@@ -209,6 +292,154 @@ export async function createOpportunity(
     updatedAt: now,
   };
 
-  const result = await collection.insertOne({ ...record });
-  return toOpportunity({ ...record, _id: result.insertedId });
+  const result = await collection.insertOne(record);
+
+  return toOpportunity({
+    ...record,
+    _id: result.insertedId,
+  });
 }
+
+/**
+ * GET /api/opportunities/mine
+ *
+ * Return events created by the authenticated user.
+ */
+export async function listMyOpportunities(
+  userId: string,
+  db?: Db,
+): Promise<Opportunity[]> {
+  const database = db ?? getDb();
+
+  const docs = await database
+    .collection<OpportunityDocument>(
+      OPPORTUNITIES_COLLECTION,
+    )
+    .find({
+      "createdBy.userId": userId,
+    })
+    .sort({
+      createdAt: -1,
+      _id: -1,
+    })
+    .toArray();
+
+  return docs.map((doc) => toOpportunity(doc));
+}
+
+/**
+ * Build an ownership-restricted filter.
+ *
+ * The JWT userId is mandatory.
+ * Another user's event will never match.
+ */
+function ownedOpportunityFilter(
+  id: string,
+  userId: string,
+): Filter<OpportunityDocument> {
+  return {
+    $and: [
+      opportunityIdentityFilter(id),
+      { "createdBy.userId": userId },
+    ],
+  };
+}
+
+/**
+ * PATCH /api/opportunities/:id
+ *
+ * Update only an event owned by the authenticated user.
+ */
+export async function updateOpportunity(
+  id: string,
+  userId: string,
+  input: UpdateOpportunityBody,
+  db?: Db,
+): Promise<Opportunity> {
+  const database = db ?? getDb();
+
+  const collection =
+    database.collection<OpportunityDocument>(
+      OPPORTUNITIES_COLLECTION,
+    );
+
+  const filter = ownedOpportunityFilter(id, userId);
+
+  const changes: Record<string, unknown> = {
+    updatedAt: new Date(),
+  };
+
+  if (input.title !== undefined) {
+    changes.title = input.title;
+  }
+
+  if (input.description !== undefined) {
+    changes.description = input.description;
+  }
+
+  if (input.eventType !== undefined) {
+    changes.category = input.eventType;
+  }
+
+  if (input.imageUrl !== undefined) {
+    changes.imageUrl = input.imageUrl;
+  }
+
+  if (input.location !== undefined) {
+    changes.location = input.location;
+    changes.city = deriveCity(input.location);
+  }
+
+  if (input.eventDate !== undefined) {
+    changes.eventDate = new Date(
+      `${input.eventDate}T00:00:00Z`,
+    ).toISOString();
+
+    changes.schedule = formatSchedule(
+      input.eventDate,
+    );
+  }
+
+  const updated = await collection.findOneAndUpdate(
+    filter,
+    { $set: changes },
+    { returnDocument: "after" },
+  );
+
+  if (!updated) {
+    throw ApiError.notFound(
+      "Event not found or access denied",
+    );
+  }
+
+  return toOpportunity(updated);
+}
+
+/**
+ * DELETE /api/opportunities/:id
+ *
+ * Delete only an event owned by the authenticated user.
+ */
+export async function deleteOpportunity(
+  id: string,
+  userId: string,
+  db?: Db,
+): Promise<void> {
+  const database = db ?? getDb();
+
+  const collection =
+    database.collection<OpportunityDocument>(
+      OPPORTUNITIES_COLLECTION,
+    );
+
+  const result = await collection.deleteOne(
+    ownedOpportunityFilter(id, userId),
+  );
+
+  if (result.deletedCount === 0) {
+    throw ApiError.notFound(
+      "Event not found or access denied",
+    );
+  }
+}
+

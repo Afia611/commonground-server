@@ -15,14 +15,17 @@ import {
 import type { AuthenticatedUser } from "../middleware/authenticate.js";
 
 /**
- * Retrieve the authenticated user from JWT middleware.
- * All protected handlers must use this identity.
+ * Verified user identity from JWT middleware.
  */
 type VerifiedEventUser = AuthenticatedUser & {
   userId: string;
   email: string;
 };
 
+/**
+ * Retrieve authenticated user from res.locals.auth.
+ * Protected routes must run requireJwtAuth first.
+ */
 function getAuthenticatedUser(
   res: Response,
 ): VerifiedEventUser | null {
@@ -45,19 +48,14 @@ function getAuthenticatedUser(
 
 /**
  * GET /api/opportunities
- *
- * Public event listing with pagination and filters.
+ * Public event listing.
  */
 export async function getOpportunities(
   _req: Request,
   res: Response,
 ): Promise<void> {
-  const {
-    page,
-    limit,
-    category,
-    search,
-  } = res.locals.validated?.query ?? {};
+  const { page, limit, category, search } =
+    res.locals.validated?.query ?? {};
 
   const filters: ListOpportunitiesFilters = {
     page,
@@ -74,7 +72,7 @@ export async function getOpportunities(
 
   const result = await listOpportunities(filters);
 
-  res.json({
+  res.status(200).json({
     success: true,
     ...result,
   });
@@ -82,8 +80,7 @@ export async function getOpportunities(
 
 /**
  * GET /api/opportunities/:id
- *
- * Public event detail.
+ * Public event details.
  */
 export async function getOpportunityByIdHandler(
   _req: Request,
@@ -93,7 +90,7 @@ export async function getOpportunityByIdHandler(
 
   const opportunity = await getOpportunityById(id);
 
-  res.json({
+  res.status(200).json({
     success: true,
     data: opportunity,
   });
@@ -101,9 +98,7 @@ export async function getOpportunityByIdHandler(
 
 /**
  * POST /api/opportunities
- *
- * Create an event.
- * Creator identity comes from verified JWT.
+ * Create an event for the authenticated user.
  */
 export async function createOpportunityHandler(
   _req: Request,
@@ -111,9 +106,7 @@ export async function createOpportunityHandler(
 ): Promise<void> {
   const auth = getAuthenticatedUser(res);
 
-  if (!auth) {
-    return;
-  }
+  if (!auth) return;
 
   const body = res.locals.validated?.body;
 
@@ -131,8 +124,7 @@ export async function createOpportunityHandler(
 
 /**
  * GET /api/opportunities/mine
- *
- * Return events created by the logged-in user.
+ * Return events belonging to the authenticated user.
  */
 export async function getMyOpportunitiesHandler(
   _req: Request,
@@ -140,15 +132,13 @@ export async function getMyOpportunitiesHandler(
 ): Promise<void> {
   const auth = getAuthenticatedUser(res);
 
-  if (!auth) {
-    return;
-  }
+  if (!auth) return;
 
   const opportunities = await listMyOpportunities(
     auth.userId,
   );
 
-  res.json({
+  res.status(200).json({
     success: true,
     data: opportunities,
   });
@@ -156,9 +146,9 @@ export async function getMyOpportunitiesHandler(
 
 /**
  * PATCH /api/opportunities/:id
+ * Update an event belonging to the authenticated user.
  *
- * Update an event owned by the logged-in user.
- * Ownership is verified in the MongoDB service.
+ * Ownership must be enforced in the service layer.
  */
 export async function updateOpportunityHandler(
   _req: Request,
@@ -166,9 +156,7 @@ export async function updateOpportunityHandler(
 ): Promise<void> {
   const auth = getAuthenticatedUser(res);
 
-  if (!auth) {
-    return;
-  }
+  if (!auth) return;
 
   const { id } = res.locals.validated?.params ?? {};
   const body = res.locals.validated?.body;
@@ -179,7 +167,7 @@ export async function updateOpportunityHandler(
     body,
   );
 
-  res.json({
+  res.status(200).json({
     success: true,
     message: "Event updated successfully",
     data: opportunity,
@@ -188,9 +176,9 @@ export async function updateOpportunityHandler(
 
 /**
  * DELETE /api/opportunities/:id
+ * Delete an event belonging to the authenticated user.
  *
- * Delete an event owned by the logged-in user.
- * Ownership is verified in the MongoDB service.
+ * Ownership must be enforced in the service layer.
  */
 export async function deleteOpportunityHandler(
   _req: Request,
@@ -198,15 +186,13 @@ export async function deleteOpportunityHandler(
 ): Promise<void> {
   const auth = getAuthenticatedUser(res);
 
-  if (!auth) {
-    return;
-  }
+  if (!auth) return;
 
   const { id } = res.locals.validated?.params ?? {};
 
   await deleteOpportunity(id, auth.userId);
 
-  res.json({
+  res.status(200).json({
     success: true,
     message: "Event deleted successfully",
   });

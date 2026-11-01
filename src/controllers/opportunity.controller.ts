@@ -18,9 +18,14 @@ import type { AuthenticatedUser } from "../middleware/authenticate.js";
  * Retrieve the authenticated user from JWT middleware.
  * All protected handlers must use this identity.
  */
+type VerifiedEventUser = AuthenticatedUser & {
+  userId: string;
+  email: string;
+};
+
 function getAuthenticatedUser(
   res: Response,
-): AuthenticatedUser | null {
+): VerifiedEventUser | null {
   const auth = res.locals.auth as
     | AuthenticatedUser
     | undefined;
@@ -35,7 +40,7 @@ function getAuthenticatedUser(
     return null;
   }
 
-  return auth;
+  return auth as VerifiedEventUser;
 }
 
 /**

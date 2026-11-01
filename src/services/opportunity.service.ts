@@ -67,14 +67,20 @@ export async function listOpportunities(
   };
 }
 
-/** Fetch a single opportunity by id (read-only). Throws 400/404 as ApiError. */
+/**
+ * Fetch a single opportunity by id (read-only). Supports both MongoDB
+ * ObjectIds (used by API consumers and the frontend after a list request)
+ * and the stable demo `slug` (used by older frontend links and bookmarks).
+ * Throws 400/404 as ApiError.
+ */
 export async function getOpportunityById(id: string, db?: Db): Promise<Opportunity> {
-  if (!ObjectId.isValid(id)) {
-    throw ApiError.badRequest("Invalid opportunity id", { id });
-  }
+  const looksLikeObjectId = ObjectId.isValid(id);
+  const query = looksLikeObjectId
+    ? { $or: [{ _id: new ObjectId(id) }, { slug: id }] }
+    : { slug: id };
 
   const database = db ?? getDb();
-  const doc = await database.collection(OPPORTUNITIES_COLLECTION).findOne({ _id: new ObjectId(id) });
+  const doc = await database.collection(OPPORTUNITIES_COLLECTION).findOne(query);
 
   if (!doc) {
     throw ApiError.notFound(`Opportunity with id '${id}' not found`);

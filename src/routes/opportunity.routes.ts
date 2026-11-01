@@ -2,7 +2,7 @@ import { Router } from "express";
 import { getOpportunities, getOpportunityByIdHandler } from "../controllers/opportunity.controller.js";
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/notFound.js";
-import { listQuerySchema, objectIdParamSchema } from "../schemas/opportunity.schema.js";
+import { listQuerySchema, opportunityParamSchema } from "../schemas/opportunity.schema.js";
 
 const router = Router();
 
@@ -12,7 +12,7 @@ router.get("/", validate("query", listQuerySchema), asyncHandler(getOpportunitie
 // GET /api/opportunities/:id — public, read-only detail
 router.get(
   "/:id",
-  validate("params", objectIdParamSchema),
+  validate("params", opportunityParamSchema),
   asyncHandler(getOpportunityByIdHandler),
 );
 

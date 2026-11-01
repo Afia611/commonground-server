@@ -2,6 +2,11 @@ import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { closeDatabase, connectToDatabase, getDbStatus } from "./config/db.js";
 import type { Server } from "http";
+import dns from "node:dns";
+
+if (process.env.NODE_ENV !== "production") {
+  dns.setServers(["8.8.8.8", "8.8.4.4"]);
+}
 
 let httpServer: Server | null = null;
 let shuttingDown = false;

@@ -123,12 +123,22 @@ describe("GET /api/opportunities/:id", () => {
     expect(getByIdMock).toHaveBeenCalledWith(validId);
   });
 
-  it("returns 400 for malformed ids", async () => {
-    const res = await request(app).get("/api/opportunities/not-an-objectid");
+  it("returns 400 for ids that are neither ObjectId nor slug", async () => {
+    const res = await request(app).get("/api/opportunities/not_an_objectid");
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
     expect(getByIdMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts slug-style ids and returns 404 when no match exists", async () => {
+    getByIdMock.mockRejectedValueOnce(ApiError.notFound("Opportunity with id 'garden-restoration' not found"));
+
+    const res = await request(app).get("/api/opportunities/garden-restoration");
+
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(getByIdMock).toHaveBeenCalledWith("garden-restoration");
   });
 
   it("returns 404 when the opportunity does not exist", async () => {

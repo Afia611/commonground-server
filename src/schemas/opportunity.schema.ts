@@ -8,11 +8,17 @@ export const listQuerySchema = z.object({
   search: z.string().trim().min(1).max(120).optional(),
 });
 
-/** Path parameters accepted by GET /api/opportunities/:id */
-export const objectIdParamSchema = z.object({
+/** Path parameters accepted by GET /api/opportunities/:id (ObjectId or slug) */
+export const opportunityParamSchema = z.object({
   id: z
     .string()
-    .regex(/^[0-9a-fA-F]{24}$/, "id must be a 24-character hexadecimal ObjectId"),
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(
+      /^(?:[0-9a-fA-F]{24}|[a-z0-9]+(?:-[a-z0-9]+)*)$/,
+      "id must be a 24-character ObjectId or an opportunity slug",
+    ),
 });
 
 export type ListOpportunitiesQuery = z.infer<typeof listQuerySchema>;

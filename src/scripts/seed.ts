@@ -23,6 +23,19 @@ import { env } from "../config/env.js";
 import { OPPORTUNITIES_COLLECTION } from "../services/opportunity.service.js";
 import { sampleOpportunities } from "../data/sample-opportunities.js";
 
+/**
+ * Fixed demo base date. Each record gets a deterministic, staggered
+ * `createdAt` so the API's "newest first" ordering shows the samples
+ * in their original demo order. Stable across runs — reseeding does
+ * not churn timestamps.
+ */
+const DEMO_BASE_DATE = new Date("2026-11-01T00:00:00.000Z");
+
+function demoCreatedAt(index: number): Date {
+  const offsetMs = (sampleOpportunities.length - 1 - index) * 3_600_000;
+  return new Date(DEMO_BASE_DATE.getTime() + offsetMs);
+}
+
 async function seed(): Promise<void> {
   // Never log the URI itself — only whether it is a local or remote target.
   const target = env.mongoUri.startsWith("mongodb+srv") ? "Atlas cluster" : "local instance";
@@ -37,13 +50,12 @@ async function seed(): Promise<void> {
   let upserted = 0;
   let updated = 0;
 
-  for (const sample of sampleOpportunities) {
-    const { slug, ...fields } = sample;
+  for (let i = 0; i < sampleOpportunities.length; i++) {
+    const { slug, ...fields } = sampleOpportunities[i];
     const result = await collection.updateOne(
       { slug },
       {
-        $set: { ...fields, slug, updatedAt: new Date() },
-        $setOnInsert: { createdAt: new Date() },
+        $set: { ...fields, slug, createdAt: demoCreatedAt(i), updatedAt: new Date() },
       },
       { upsert: true },
     );

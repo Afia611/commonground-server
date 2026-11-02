@@ -3,7 +3,6 @@ import {
   ObjectId,
   type Document,
   type Filter,
-  type WithId,
 } from "mongodb";
 
 import {
@@ -27,6 +26,36 @@ interface ParticipationDocument {
   opportunityId: ObjectId;
   userId: string;
   joinedAt: Date;
+}
+
+/**
+ * Get today's date in Bangladesh (YYYY-MM-DD).
+ */
+function getTodayInBangladesh(): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = parts.find(
+    (part) => part.type === "year",
+  )?.value;
+
+  const month = parts.find(
+    (part) => part.type === "month",
+  )?.value;
+
+  const day = parts.find(
+    (part) => part.type === "day",
+  )?.value;
+
+  if (!year || !month || !day) {
+    throw new Error("Unable to determine Bangladesh date.");
+  }
+
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -91,7 +120,9 @@ export async function joinOpportunity(
       );
 
       if (!opportunity?._id) {
-        throw ApiError.notFound("Opportunity not found.");
+        throw ApiError.notFound(
+          "Opportunity not found.",
+        );
       }
 
       const opportunityId = opportunity._id as ObjectId;
@@ -107,41 +138,17 @@ export async function joinOpportunity(
         );
       }
 
-      // Prevent joining events that have already started or passed.
-      // Event dates are stored as ISO strings at UTC midnight.
+      /**
+       * Prevent joining events that have
+       * already started or passed.
+       *
+       * Event dates are stored as ISO strings.
+       */
       const eventDate = opportunity.eventDate;
 
       if (
         typeof eventDate === "string" &&
-        eventDate.slice(0, 10) <=
-          new Intl.DateTimeFormat("en-CA", {
-            timeZone: "Asia/Dhaka",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          })
-            .formatToParts(new Date())
-            .reduce<Record<string, string>>((parts, part) => {
-              if (
-                part.type === "year" ||
-                part.type === "month" ||
-                part.type === "day"
-              ) {
-                parts[part.type] = part.value;
-              }
-              return parts;
-            }, {})
-            .year +
-            "-" +
-            new Intl.DateTimeFormat("en-CA", {
-              timeZone: "Asia/Dhaka",
-              month: "2-digit",
-            }).format(new Date()) +
-            "-" +
-            new Intl.DateTimeFormat("en-CA", {
-              timeZone: "Asia/Dhaka",
-              day: "2-digit",
-            }).format(new Date())
+        eventDate.slice(0, 10) <= getTodayInBangladesh()
       ) {
         throw new ApiError(
           409,
@@ -149,6 +156,9 @@ export async function joinOpportunity(
         );
       }
 
+      /**
+       * Prevent duplicate participation.
+       */
       const existing = await participations.findOne(
         { opportunityId, userId },
         { session },
@@ -161,6 +171,9 @@ export async function joinOpportunity(
         );
       }
 
+      /**
+       * Reduce available spots by one.
+       */
       const updated = await opportunities.findOneAndUpdate(
         {
           _id: opportunityId,
@@ -183,6 +196,9 @@ export async function joinOpportunity(
         );
       }
 
+      /**
+       * Save participation record.
+       */
       await participations.insertOne(
         {
           opportunityId,
@@ -208,7 +224,8 @@ export async function joinOpportunity(
 }
 
 /**
- * Leave an event and restore one available spot.
+ * Leave an event and restore
+ * one available spot.
  */
 export async function leaveOpportunity(
   id: string,
@@ -236,11 +253,16 @@ export async function leaveOpportunity(
       );
 
       if (!opportunity?._id) {
-        throw ApiError.notFound("Opportunity not found.");
+        throw ApiError.notFound(
+          "Opportunity not found.",
+        );
       }
 
       const opportunityId = opportunity._id as ObjectId;
 
+      /**
+       * Delete user's participation.
+       */
       const deleted = await participations.deleteOne(
         { opportunityId, userId },
         { session },
@@ -252,6 +274,9 @@ export async function leaveOpportunity(
         );
       }
 
+      /**
+       * Restore one available spot.
+       */
       await opportunities.updateOne(
         { _id: opportunityId },
         {

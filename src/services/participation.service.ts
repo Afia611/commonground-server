@@ -29,7 +29,8 @@ interface ParticipationDocument {
 }
 
 /**
- * Get today's date in Bangladesh (YYYY-MM-DD).
+ * Get today's date in Bangladesh.
+ * Returns YYYY-MM-DD.
  */
 function getTodayInBangladesh(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -52,10 +53,42 @@ function getTodayInBangladesh(): string {
   )?.value;
 
   if (!year || !month || !day) {
-    throw new Error("Unable to determine Bangladesh date.");
+    throw new Error(
+      "Unable to determine Bangladesh date.",
+    );
   }
 
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Safely convert an event date to a timestamp.
+ * Invalid or missing dates are sorted last.
+ */
+function getEventTimestamp(value: unknown): number {
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+
+    return Number.isFinite(timestamp)
+      ? timestamp
+      : Number.MAX_SAFE_INTEGER;
+  }
+
+  if (typeof value === "string") {
+    const timestamp = Date.parse(value);
+
+    return Number.isFinite(timestamp)
+      ? timestamp
+      : Number.MAX_SAFE_INTEGER;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value)
+      ? value
+      : Number.MAX_SAFE_INTEGER;
+  }
+
+  return Number.MAX_SAFE_INTEGER;
 }
 
 /**
@@ -144,7 +177,7 @@ export async function joinOpportunity(
        *
        * Event dates are stored as ISO strings.
        */
-      const eventDate = opportunity.eventDate;
+      const eventDate: unknown = opportunity.eventDate;
 
       if (
         typeof eventDate === "string" &&
@@ -327,13 +360,8 @@ export async function listJoinedOpportunities(
   const joinedOpportunities = opportunities
     .map((opportunity) => toOpportunity(opportunity))
     .sort((a, b) => {
-      const dateA = a.eventDate
-        ? new Date(a.eventDate).getTime()
-        : Number.MAX_SAFE_INTEGER;
-
-      const dateB = b.eventDate
-        ? new Date(b.eventDate).getTime()
-        : Number.MAX_SAFE_INTEGER;
+      const dateA = getEventTimestamp(a.eventDate);
+      const dateB = getEventTimestamp(b.eventDate);
 
       return dateA - dateB;
     });

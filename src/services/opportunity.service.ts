@@ -118,7 +118,31 @@ export async function listOpportunities(
     ),
   };
 }
+/**
+ * GET upcoming events for the Home Page.
+ * Returns a maximum of 6 future events.
+ */
+export async function listUpcomingOpportunities(
+  db?: Db,
+): Promise<Opportunity[]> {
+  const database = db ?? getDb();
 
+  const now = new Date().toISOString();
+
+  const docs = await database
+    .collection<OpportunityDocument>(OPPORTUNITIES_COLLECTION)
+    .find({
+      eventDate: { $gt: now },
+    })
+    .sort({
+      eventDate: 1,
+      _id: 1,
+    })
+    .limit(6)
+    .toArray();
+
+  return docs.map((doc) => toOpportunity(doc));
+}
 /**
  * Build a MongoDB identity filter.
  * Supports both ObjectId and slug.

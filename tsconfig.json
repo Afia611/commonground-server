@@ -17,6 +17,6 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": false
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/controllers/participation.controller.tsx", "src/routes/participation.routes.tsx"],
   "exclude": ["node_modules", "dist", "tests"]
 }

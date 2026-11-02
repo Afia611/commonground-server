@@ -16,7 +16,9 @@ export type ListOpportunitiesQuery = z.infer<
 >;
 
 /**
- * Path parameters for opportunity details, updates and deletion.
+ * Path parameters for opportunity details,
+ * updates, and deletion.
+ *
  * Supports MongoDB ObjectId and event slug.
  */
 export const opportunityParamSchema = z.object({
@@ -47,6 +49,7 @@ export type EventType = (typeof EVENT_TYPES)[number];
 
 /**
  * Validate image URL.
+ * Only HTTP and HTTPS URLs are accepted.
  */
 const httpUrl = z
   .string()
@@ -69,9 +72,16 @@ const httpUrl = z
   );
 
 /**
- * Validate a real calendar date.
+ * Validate that the supplied date is a real
+ * calendar date in YYYY-MM-DD format.
+ *
+ * Rejects invalid dates such as 2026-02-30.
  */
 function isRealCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return false;
+  }
+
   const date = new Date(`${raw}T00:00:00Z`);
 
   if (Number.isNaN(date.getTime())) {
@@ -82,21 +92,58 @@ function isRealCalendarDate(raw: string): boolean {
 }
 
 /**
- * Validate today or a future date.
- * Uses UTC calendar dates consistently with event storage.
+ * Get today's calendar date in Bangladesh.
+ *
+ * Using Asia/Dhaka avoids date differences
+ * caused by the hosting server's timezone.
+ */
+function getTodayInBangladesh(): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(new Date());
+
+  const year = parts.find(
+    (part) => part.type === "year"
+  )?.value;
+
+  const month = parts.find(
+    (part) => part.type === "month"
+  )?.value;
+
+  const day = parts.find(
+    (part) => part.type === "day"
+  )?.value;
+
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Accept only future calendar dates.
+ *
+ * Today's date and all past dates are rejected.
  */
 function dayIsInFuture(raw: string): boolean {
   if (!isRealCalendarDate(raw)) {
     return false;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayInBangladesh();
 
-  return raw >= today;
+  return raw > today;
 }
 
 /**
  * Event date validation.
+ *
+ * Requirements:
+ * - YYYY-MM-DD format
+ * - Real calendar date
+ * - Strictly after today
  */
 const eventDateString = z
   .string()
@@ -111,13 +158,14 @@ const eventDateString = z
   )
   .refine(
     dayIsInFuture,
-    "Event date cannot be in the past"
+    "Event date must be in the future"
   );
 
 /**
  * POST /api/opportunities
  *
  * Create Event validation.
+ *
  * Creator identity comes from the verified JWT,
  * never from the submitted request body.
  */

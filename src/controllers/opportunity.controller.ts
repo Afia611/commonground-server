@@ -7,6 +7,7 @@ import {
   createOpportunity,
   getOpportunityById,
   listOpportunities,
+  listUpcomingOpportunities,
   listMyOpportunities,
   updateOpportunity,
   deleteOpportunity,
@@ -75,6 +76,21 @@ export async function getOpportunities(
   res.status(200).json({
     success: true,
     ...result,
+  });
+}
+/**
+ * GET /api/opportunities/upcoming
+ * Return up to 6 upcoming events for the Home Page.
+ */
+export async function getUpcomingOpportunities(
+  _req: Request,
+  res: Response,
+): Promise<void> {
+  const opportunities = await listUpcomingOpportunities();
+
+  res.status(200).json({
+    success: true,
+    data: opportunities,
   });
 }
 

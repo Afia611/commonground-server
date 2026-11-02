@@ -4,6 +4,7 @@ import { Router } from "express";
 import {
   createOpportunityHandler,
   getOpportunities,
+  getUpcomingOpportunities,
   getOpportunityByIdHandler,
   getMyOpportunitiesHandler,
   updateOpportunityHandler,
@@ -28,6 +29,13 @@ router.get(
   "/",
   validate("query", listQuerySchema),
   asyncHandler(getOpportunities),
+);
+
+// GET /api/opportunities/upcoming
+// Public endpoint: returns up to 6 upcoming events
+router.get(
+  "/upcoming",
+  asyncHandler(getUpcomingOpportunities),
 );
 
 // POST /api/opportunities — protected event creation

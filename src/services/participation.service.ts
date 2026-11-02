@@ -91,9 +91,7 @@ export async function joinOpportunity(
       );
 
       if (!opportunity?._id) {
-        throw ApiError.notFound(
-          "Opportunity not found.",
-        );
+        throw ApiError.notFound("Opportunity not found.");
       }
 
       const opportunityId = opportunity._id as ObjectId;
@@ -106,6 +104,48 @@ export async function joinOpportunity(
         throw new ApiError(
           403,
           "You cannot join an event you created.",
+        );
+      }
+
+      // Prevent joining events that have already started or passed.
+      // Event dates are stored as ISO strings at UTC midnight.
+      const eventDate = opportunity.eventDate;
+
+      if (
+        typeof eventDate === "string" &&
+        eventDate.slice(0, 10) <=
+          new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Dhaka",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          })
+            .formatToParts(new Date())
+            .reduce<Record<string, string>>((parts, part) => {
+              if (
+                part.type === "year" ||
+                part.type === "month" ||
+                part.type === "day"
+              ) {
+                parts[part.type] = part.value;
+              }
+              return parts;
+            }, {})
+            .year +
+            "-" +
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Dhaka",
+              month: "2-digit",
+            }).format(new Date()) +
+            "-" +
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Dhaka",
+              day: "2-digit",
+            }).format(new Date())
+      ) {
+        throw new ApiError(
+          409,
+          "You cannot join an event that has already started or passed.",
         );
       }
 
@@ -196,9 +236,7 @@ export async function leaveOpportunity(
       );
 
       if (!opportunity?._id) {
-        throw ApiError.notFound(
-          "Opportunity not found.",
-        );
+        throw ApiError.notFound("Opportunity not found.");
       }
 
       const opportunityId = opportunity._id as ObjectId;
@@ -229,7 +267,8 @@ export async function leaveOpportunity(
 }
 
 /**
- * Return events joined by the authenticated user.
+ * Return events joined by the authenticated user,
+ * sorted by event date (earliest first).
  */
 export async function listJoinedOpportunities(
   userId: string,
@@ -243,7 +282,6 @@ export async function listJoinedOpportunities(
 
   const registrations = await participations
     .find({ userId })
-    .sort({ joinedAt: -1 })
     .toArray();
 
   if (registrations.length === 0) {
@@ -261,29 +299,19 @@ export async function listJoinedOpportunities(
     })
     .toArray();
 
-  const opportunityMap = new Map<
-    string,
-    WithId<Document>
-  >(
-    opportunities.map((opportunity) => [
-      opportunity._id.toHexString(),
-      opportunity,
-    ]),
-  );
+  const joinedOpportunities = opportunities
+    .map((opportunity) => toOpportunity(opportunity))
+    .sort((a, b) => {
+      const dateA = a.eventDate
+        ? new Date(a.eventDate).getTime()
+        : Number.MAX_SAFE_INTEGER;
 
-  const joinedOpportunities: Opportunity[] = [];
+      const dateB = b.eventDate
+        ? new Date(b.eventDate).getTime()
+        : Number.MAX_SAFE_INTEGER;
 
-  for (const registration of registrations) {
-    const opportunity = opportunityMap.get(
-      registration.opportunityId.toHexString(),
-    );
-
-    if (opportunity) {
-      joinedOpportunities.push(
-        toOpportunity(opportunity),
-      );
-    }
-  }
+      return dateA - dateB;
+    });
 
   return joinedOpportunities;
 }
